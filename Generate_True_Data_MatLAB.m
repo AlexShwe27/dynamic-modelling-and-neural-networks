@@ -1,34 +1,49 @@
-% Constants
-g = 9.81;  % Acceleration due to gravity (m/s^2)
-L = 1.0;     % Length of the pendulum (meters)
-m = 1.0;     % Mass of the pendulum (kg)
-    
-% Initial conditions
-theta0 = 165 * (pi/180);  % Initial angle (radians)
-p0 = 0;        % Initial angular momentum (kg*m^2/s)
+%% Constants
 
-% Time span
-tspan = [0 10];  % Simulation for 6 seconds
-    
-% Initial state vector
-initial_conditions = [theta0; p0];
-    
+g = 9.81;    % Acceleration due to gravity (m/s^2)
+mc = 5.0;    % Mass of the cart (kg)
+mp = 2.0;    % Mass of the pendulum (kg)
+l = 0.75;    % Length of the pendulum arm (m)
+
+%% Initial Conditions
+
+theta0 = 15 * (pi/180);     % Initial angle (radians)
+x0 = 0.0;                   % Initial cart distance (m)
+ptheta0 = 0.0;              % Initial angular momentum (kg*m^2/s)
+px0 = 0.0;                  % Initial linear momentum (kg*m/s)
+
+% initial state vector
+initial_conditions = [theta0; x0; ptheta0; px0];
+
+%% Simulation
+
+% time span
+tspan = [0 6];  % Simulation for 6 seconds
+
 % Solver options
-options = odeset('MaxStep', 0.0004, 'InitialStep', 0.0004);  % Set maximum and initial step sizes
-   
+options = odeset('MaxStep', 0.00024, 'InitialStep', 0.00024);  % Set maximum and initial step sizes
+
 % Solve the ODE
-[t, y] = ode45(@(t, y) pendulum_ode(t, y, m, g, L), tspan, initial_conditions, options);
-    
-% Extracting theta and p from the results
+[t, y] = ode45(@(t, y) CartPole_ode(t, y, mc, mp, g, l), tspan, initial_conditions, options);
+
+%% Results
+
+% Extracting results
 theta = y(:, 1);
-p = y(:, 2);
-    
-% Energy calculations
-KE = 0.5 * (p.^2) / (m * L.^2);  % Kinetic Energy
-PE = m * g * L * (1 - cos(theta));  % Potential Energy
-TE = KE + PE;  % Total Energy
-    
-% Plot the results
+x = y(:, 2);
+ptheta = y(:, 3);
+px = y(:, 4);
+
+%% Energy calculations
+
+% Kinetic Energy
+KE = (0.5*((mc+mp)/(mc.^2))*(px.^2)) - ((1/(mc*l))*px.*ptheta.*cos(theta)) + (0.5*(1/(mp*(l.^2)))*(ptheta.^2));
+% Potential Energy
+PE = mp*g*l*cos(theta);
+% Total Energy
+TE = KE + PE;
+
+%% Plots
 figure;
 subplot(3, 1, 1);
 plot(t, theta);
@@ -37,10 +52,10 @@ xlabel('Time (s)');
 ylabel('Angle (rad)');
     
 subplot(3, 1, 2);
-plot(t, p);
-title('Angular Momentum vs. Time');
+plot(t, x);
+title('Cart Position vs. Time');
 xlabel('Time (s)');
-ylabel('Angular Momentum (kg*m^2/s)');
+ylabel('Cart Position (m)');
 
 subplot(3, 1, 3);
 plot(t, TE);
@@ -48,20 +63,27 @@ title('Total Energy vs. Time');
 xlabel('Time (s)');
 ylabel('Total Energy (J)');
 
+%% Save the simulation data
+
 % Create a table to save data
-data = table(t, theta, p, 'VariableNames', ...
-    {'Time', 'Pendulum Angle', 'Angular Momentum'});
+data = table(t, theta, x, ptheta, px, 'VariableNames', ...
+    {'Time', 'Pendulum Angle', 'Cart Position', 'Angular Momentum', 'Linear Momentum'});
 
 % Save data
-writetable(data, 'pendulum_simulation_data.csv');
+writetable(data, 'cartpole_simulation_data.csv');
 
-function dydt = pendulum_ode(t, y, m, g, L)
-    theta = y(1);
-    p = y(2);
+%% ODE for CartPole
+function dydt = CartPole_ode(t, y, mc, mp, g, l)
+    theta   = y(1);
+    x       = y(2);
+    ptheta  = y(3);
+    px      = y(4);
     
     % Derivatives
-    dtheta_dt = p / (m * L^2);
-    dp_dt = -m * g * L * sin(theta);
+    dtheta_dt   = ((1/(mp*(l.^2)))*ptheta) - (1/(mc*l)*cos(theta)*px);
+    dx_dt       = (((mc+mp)/(mc.^2))*px) - (1/(mc*l)*cos(theta)*ptheta);
+    dptheta_dt  = (mp*g*l*sin(theta)) - ((1/(mc*l))*ptheta*px*sin(theta));
+    dpx_dt      = 0;
     
-    dydt = [dtheta_dt; dp_dt];
+    dydt = [dtheta_dt; dx_dt; dptheta_dt; dpx_dt];
 end

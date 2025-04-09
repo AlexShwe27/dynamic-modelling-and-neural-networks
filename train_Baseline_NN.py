@@ -14,20 +14,22 @@ import pandas as pd
 # -------------------------------------------------------------------------------------------------------------------
 
 # Load simulation data
-sim_data = pd.read_csv('pendulum_simulation_data.csv')
+sim_data = pd.read_csv('cartpole_simulation_data.csv')
 sim_data = sim_data.iloc[:-1]
 sim_data = sim_data.iloc[::10].reset_index(drop=True)
 
 # Extract the variables from the DataFrame
 time = sim_data.iloc[:, 0].to_numpy(dtype=np.float32)
 angle = sim_data.iloc[:, 1].to_numpy(dtype=np.float32)
-angular_momentum = sim_data.iloc[:, 2].to_numpy(dtype=np.float32)
+position = sim_data.iloc[:, 2].to_numpy(dtype=np.float32)
+angular_momentum = sim_data.iloc[:, 3].to_numpy(dtype=np.float32)
+linear_momentum = sim_data.iloc[:, 4].to_numpy(dtype=np.float32)\
 
 # Time
 time = torch.tensor(time, dtype=torch.float32)
 
 # True Trajectory
-true_trajectory = np.column_stack((angle, angular_momentum))
+true_trajectory = np.column_stack((angle, position, angular_momentum, linear_momentum))
 true_trajectory = torch.tensor(true_trajectory, dtype=torch.float32)
 
 # Initial Conditions
@@ -44,6 +46,7 @@ batch_time = 10
 # Simulation time
 nsteps = data_size
 
+
 # ===================================================================================================================
 # NEURAL ORDINARY DIFFERENTIAL EQUATION
 # ===================================================================================================================
@@ -52,17 +55,16 @@ nsteps = data_size
 # Neural Network
 # -------------------------------------------------------------------------------------------------------------------
 
-
 class baseline_net(nn.Module):
 
     def __init__(self):
         super(baseline_net, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(2, 128),
+            nn.Linear(4, 128),
             nn.Tanh(),
             nn.Linear(128, 128),
             nn.Tanh(),
-            nn.Linear(128, 2)
+            nn.Linear(128, 4)
         )
 
         for m in self.net.modules():
@@ -78,7 +80,7 @@ class baseline_net(nn.Module):
 # Neural ODE
 # -------------------------------------------------------------------------------------------------------------------
 
-def pendulum_baseline_neuralODE(t, state):
+def cartpole_baseline_neuralODE(t, state):
 
     state = state.requires_grad_(True)
 
@@ -132,7 +134,7 @@ test_y0 = test_y[0, :]
 # -------------------------------------------------------------------------------------------------------------------
 
 test_freq = 10
-niters = 2000
+niters = 4000
 
 neural_network = baseline_net()
 optimizer = optim.Adam(neural_network.parameters(), lr=0.02)
@@ -150,7 +152,7 @@ for itr in range(1, niters + 1):
     mini_batches, mini_batches_y0 = get_batch(train_y)
     for batch_y, batch_y0 in zip(mini_batches, mini_batches_y0):
 
-        pred = odeint(pendulum_baseline_neuralODE, batch_y0, batch_t, method="heun3")
+        pred = odeint(cartpole_baseline_neuralODE, batch_y0, batch_t, method="rk4")
         loss = loss_function(pred, batch_y)
 
         optimizer.zero_grad()
@@ -167,7 +169,7 @@ for itr in range(1, niters + 1):
     # validation
     if itr % test_freq == 0:
 
-        test_pred = odeint(pendulum_baseline_neuralODE, test_y0, test_t, method="heun3")
+        test_pred = odeint(cartpole_baseline_neuralODE, test_y0, test_t, method="rk4")
         test_loss = loss_function(test_pred, test_y)
         val_loss.append(test_loss.item())
 
@@ -181,7 +183,8 @@ learning_data = pd.DataFrame({
     'Test Loss': [loss for loss in val_loss for _ in range(10)],
 })
 
-learning_data.to_csv("baseline_learning_Data.csv", index=False)
+learning_data.to_csv("Baseline_Learning_Data.csv", index=False)
 
 # Save the trained model
-torch.save(neural_network.state_dict(), "pendulum_baseline_NN.pth")
+torch.save(neural_network.state_dict(), "cartpole_baseline_NN.pth")
+

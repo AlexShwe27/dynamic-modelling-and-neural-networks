@@ -14,20 +14,22 @@ import pandas as pd
 # -------------------------------------------------------------------------------------------------------------------
 
 # Load simulation data
-sim_data = pd.read_csv('pendulum_simulation_data.csv')
+sim_data = pd.read_csv('cartpole_simulation_data.csv')
 sim_data = sim_data.iloc[:-1]
 sim_data = sim_data.iloc[::10].reset_index(drop=True)
 
 # Extract the variables from the DataFrame
-sim_time = sim_data.iloc[:, 0].to_numpy(dtype=np.float32)
-sim_angle = sim_data.iloc[:, 1].to_numpy(dtype=np.float32)
-sim_angular_momentum = sim_data.iloc[:, 2].to_numpy(dtype=np.float32)
+time = sim_data.iloc[:, 0].to_numpy(dtype=np.float32)
+angle = sim_data.iloc[:, 1].to_numpy(dtype=np.float32)
+position = sim_data.iloc[:, 2].to_numpy(dtype=np.float32)
+angular_momentum = sim_data.iloc[:, 3].to_numpy(dtype=np.float32)
+linear_momentum = sim_data.iloc[:, 4].to_numpy(dtype=np.float32)
 
 # Time
-time = torch.tensor(sim_time, dtype=torch.float32)
+time = torch.tensor(time, dtype=torch.float32)
 
 # True Trajectory
-true_trajectory = np.column_stack((sim_angle, sim_angular_momentum))
+true_trajectory = np.column_stack((angle, position, angular_momentum, linear_momentum))
 true_trajectory = torch.tensor(true_trajectory, dtype=torch.float32)
 
 # Initial Conditions
@@ -44,6 +46,7 @@ batch_time = 10
 # Simulation time
 nsteps = data_size
 
+
 # ===================================================================================================================
 # NEURAL ORDINARY DIFFERENTIAL EQUATION
 # ===================================================================================================================
@@ -52,17 +55,16 @@ nsteps = data_size
 # Neural Network
 # -------------------------------------------------------------------------------------------------------------------
 
-
 class hamiltonian_net(nn.Module):
 
     def __init__(self):
         super(hamiltonian_net, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(2, 384),
+            nn.Linear(4, 576),
             nn.Tanh(),
-            nn.Linear(384, 384),
+            nn.Linear(576, 576),
             nn.Tanh(),
-            nn.Linear(384, 1)
+            nn.Linear(576, 1)
         )
 
         for m in self.net.modules():
@@ -78,7 +80,7 @@ class hamiltonian_net(nn.Module):
 # Neural ODE
 # -------------------------------------------------------------------------------------------------------------------
 
-def pendulum_hamiltonian_neuralODE(t, state):
+def cartpole_hamiltonian_neuralODE(t, state):
 
     state = state.requires_grad_(True)
 
@@ -91,17 +93,17 @@ def pendulum_hamiltonian_neuralODE(t, state):
     # Calculate the sate derivatives from the gradients of Hamiltonian
     if dH.dim() == 2:
         # Calculate dqdt and dpdt
-        dqdt = dH[:, 1]
-        dpdt = -dH[:, 0]
+        dqdt = dH[:, 2:4]
+        dpdt = -dH[:, 0:2]
         # Combine dqdt and dpdt into a single tensor
-        dstate = torch.stack([dqdt, dpdt], dim=1)
+        dstate = torch.cat([dqdt, dpdt], dim=1)
 
     else:
         # Calculate dqdt and dpdt
-        dqdt = dH[1]
-        dpdt = -dH[0]
+        dqdt = dH[2:4]
+        dpdt = -dH[0:2]
         # Combine dqdt and dpdt into a single tensor
-        dstate = torch.stack([dqdt, dpdt])
+        dstate = torch.cat([dqdt, dpdt])
 
     return dstate
 
@@ -150,11 +152,11 @@ test_y0 = test_y[0, :]
 # -------------------------------------------------------------------------------------------------------------------
 
 test_freq = 10
-niters = 10000
+niters = 5000
 
 neural_network = hamiltonian_net()
 optimizer = optim.Adam(neural_network.parameters(), lr=0.01)
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.5)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.5)
 loss_function = nn.MSELoss()
 
 # Set up lists for training and validation loss
@@ -168,7 +170,7 @@ for itr in range(1, niters + 1):
     mini_batches, mini_batches_y0 = get_batch(train_y)
     for batch_y, batch_y0 in zip(mini_batches, mini_batches_y0):
 
-        pred = odeint(pendulum_hamiltonian_neuralODE, batch_y0, batch_t, method="heun3")
+        pred = odeint(cartpole_hamiltonian_neuralODE, batch_y0, batch_t, method="heun3")
         loss = loss_function(pred, batch_y)
 
         optimizer.zero_grad()
@@ -184,8 +186,7 @@ for itr in range(1, niters + 1):
 
     # validation
     if itr % test_freq == 0:
-
-        test_pred = odeint(pendulum_hamiltonian_neuralODE, test_y0, test_t, method="heun3")
+        test_pred = odeint(cartpole_hamiltonian_neuralODE, test_y0, test_t, method="heun3")
         test_loss = loss_function(test_pred, test_y)
         val_loss.append(test_loss.item())
 
@@ -202,4 +203,4 @@ learning_data = pd.DataFrame({
 learning_data.to_csv("HNN_Learning_Data.csv", index=False)
 
 # Save the trained model
-torch.save(neural_network.state_dict(), "pendulum_hamiltonian_NN.pth")
+torch.save(neural_network.state_dict(), "cartpole_hamiltonian_NN.pth")

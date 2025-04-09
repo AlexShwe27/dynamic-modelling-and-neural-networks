@@ -14,20 +14,22 @@ import pandas as pd
 # -------------------------------------------------------------------------------------------------------------------
 
 # Load simulation data
-sim_data = pd.read_csv('pendulum_simulation_data.csv')
+sim_data = pd.read_csv('cartpole_simulation_data.csv')
 sim_data = sim_data.iloc[:-1]
 sim_data = sim_data.iloc[::10].reset_index(drop=True)
 
 # Extract the variables from the DataFrame
 time = sim_data.iloc[:, 0].to_numpy(dtype=np.float32)
 angle = sim_data.iloc[:, 1].to_numpy(dtype=np.float32)
-angular_momentum = sim_data.iloc[:, 2].to_numpy(dtype=np.float32)
+position = sim_data.iloc[:, 2].to_numpy(dtype=np.float32)
+angular_momentum = sim_data.iloc[:, 3].to_numpy(dtype=np.float32)
+linear_momentum = sim_data.iloc[:, 4].to_numpy(dtype=np.float32)
 
 # Time
 time = torch.tensor(time, dtype=torch.float32)
 
 # True Trajectory
-true_trajectory = np.column_stack((angle, angular_momentum))
+true_trajectory = np.column_stack((angle, position, angular_momentum, linear_momentum))
 true_trajectory = torch.tensor(true_trajectory, dtype=torch.float32)
 
 # Initial Conditions
@@ -44,12 +46,13 @@ batch_time = 10
 # Simulation time
 nsteps = data_size
 
+
 # ===================================================================================================================
 # NEURAL ORDINARY DIFFERENTIAL EQUATION
 # ===================================================================================================================
 
 # -------------------------------------------------------------------------------------------------------------------
-# Neural Network
+# Neural Networks
 # -------------------------------------------------------------------------------------------------------------------
 
 
@@ -58,11 +61,11 @@ class kinetic_energy_net(nn.Module):
     def __init__(self):
         super(kinetic_energy_net, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(2, 256),
+            nn.Linear(4, 384),
             nn.Tanh(),
-            nn.Linear(256, 256),
+            nn.Linear(384, 384),
             nn.Tanh(),
-            nn.Linear(256, 1)
+            nn.Linear(384, 1)
         )
 
         for m in self.net.modules():
@@ -79,11 +82,11 @@ class potential_energy_net(nn.Module):
     def __init__(self):
         super(potential_energy_net, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(1, 128),
+            nn.Linear(2, 192),
             nn.Tanh(),
-            nn.Linear(128, 128),
+            nn.Linear(192, 192),
             nn.Tanh(),
-            nn.Linear(128, 1)
+            nn.Linear(192, 1)
         )
 
         for m in self.net.modules():
@@ -99,16 +102,16 @@ class potential_energy_net(nn.Module):
 # Neural ODE
 # -------------------------------------------------------------------------------------------------------------------
 
-def pendulum_splitenergy_neuralODE(t, state):
+def cartpole_energy_neuralODE(t, state):
 
     state = state.requires_grad_(True)
 
     if state.dim() == 2:
-        q = state[:, 0].unsqueeze(1)
-        p = state[:, 1].unsqueeze(1)
+        q = state[:, 0:2]
+        p = state[:, 2:4]
     else:
-        q = state[0].unsqueeze(0)
-        p = state[1].unsqueeze(0)
+        q = state[0:2]
+        p = state[2:4]
 
     # Obtain the kinetic energy and potential energy from Neural Network
     T = kinetic_neural_network(state)
@@ -120,17 +123,17 @@ def pendulum_splitenergy_neuralODE(t, state):
 
     if state.dim() == 2:
         # Calculate dqdt and dpdt
-        dqdt = dT[:, 1]
-        dpdt = -dT[:, 0] - dVdq.squeeze()
+        dqdt = dT[:, 2:4]
+        dpdt = -dT[:, 0:2] - dVdq
         # Combine dqdt and dpdt into a single tensor
-        dstate = torch.stack([dqdt, dpdt], dim=1)
+        dstate = torch.cat([dqdt, dpdt], dim=1)
 
     else:
         # Calculate dqdt and dpdt
-        dqdt = dT[1]
-        dpdt = -dT[0] - dVdq
+        dqdt = dT[2:4]
+        dpdt = -dT[0:2] - dVdq
         # Combine dqdt and dpdt into a single tensor
-        dstate = torch.stack([dqdt, dpdt.squeeze()])
+        dstate = torch.cat([dqdt, dpdt])
 
     return dstate
 
@@ -201,8 +204,7 @@ for itr in range(1, niters + 1):
 
     mini_batches, mini_batches_y0 = get_batch(train_y)
     for batch_y, batch_y0 in zip(mini_batches, mini_batches_y0):
-
-        pred = odeint(pendulum_splitenergy_neuralODE, batch_y0, batch_t, method="heun3")
+        pred = odeint(cartpole_energy_neuralODE, batch_y0, batch_t, method="heun3")
         loss = loss_function(pred, batch_y)
 
         kinetic_optimizer.zero_grad()
@@ -222,23 +224,23 @@ for itr in range(1, niters + 1):
     # validation
     if itr % test_freq == 0:
 
-        test_pred = odeint(pendulum_splitenergy_neuralODE, test_y0, test_t, method="heun3")
+        test_pred = odeint(cartpole_energy_neuralODE, test_y0, test_t, method="heun3")
         test_loss = loss_function(test_pred, test_y)
         val_loss.append(test_loss.item())
 
         print('Training Process : {:.2f}% | Train Loss : {:.16f} | Test Loss : {:.16f} | Learning rate : {}'
               .format(itr / niters * 100, avg_epoch_loss, test_loss.item(), kinetic_scheduler.get_last_lr()))
 
-
 # Save the learning curve data
 learning_data = pd.DataFrame({
     'Train Loss': train_loss,
-    'Test Loss': [loss for loss in val_loss for _ in range(10)]
+    'Test Loss': [loss for loss in val_loss for _ in range(10)],
+    'Loss in angle': [loss for loss in theta_loss for _ in range(10)]
 })
 
 learning_data.to_csv("SENN_Learning_Data.csv", index=False)
 
 # Save the trained model
-# Save the trained models
-torch.save(kinetic_neural_network.state_dict(), "pendulum_kinetic_energy_NN.pth")
-torch.save(potential_neural_network.state_dict(), "pendulum_potential_energy_NN.pth")
+torch.save(kinetic_neural_network.state_dict(), "cartpole_kinetic_energy_NN.pth")
+torch.save(potential_neural_network.state_dict(), "cartpole_potential_energy_NN.pth")
+
